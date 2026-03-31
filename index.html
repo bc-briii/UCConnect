@@ -473,12 +473,44 @@
     let messagesDB = JSON.parse(localStorage.getItem('orbitmeet_messages')) || {};
     let pendingRings = JSON.parse(localStorage.getItem('orbitmeet_pending')) || {};
     let currentUser = null;
+    let userLocation = null;
 
     function saveAll() {
         localStorage.setItem('orbitmeet_users', JSON.stringify(usersDB));
         localStorage.setItem('orbitmeet_history', JSON.stringify(ringHistory));
         localStorage.setItem('orbitmeet_messages', JSON.stringify(messagesDB));
         localStorage.setItem('orbitmeet_pending', JSON.stringify(pendingRings));
+    }
+
+    // Get user's location
+    function getUserLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    userLocation = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                    console.log('Location found:', userLocation);
+                    if (currentUser) {
+                        currentUser.location = userLocation;
+                        saveAll();
+                    }
+                },
+                function(error) {
+                    console.log('Location access denied:', error);
+                    // Use default location for testing
+                    userLocation = { lat: 40.7128, lng: -74.0060 }; // New York
+                    if (currentUser) {
+                        currentUser.location = userLocation;
+                        saveAll();
+                    }
+                }
+            );
+        } else {
+            console.log('Geolocation not supported');
+            userLocation = { lat: 40.7128, lng: -74.0060 }; // Default
+        }
     }
 
     // Seed default users - REMOVED for real deployment
@@ -645,11 +677,25 @@
 
     function findNearbyUsers() {
         if (!currentUser) return;
+        
+        // Get user location first
+        getUserLocation();
+        
         let others = usersDB.filter(u => u.username !== currentUser.username && u.completed === true);
         let container = document.getElementById('usersContainer');
         container.innerHTML = '';
         
-        if (others.length === 0) {
+        // Filter by proximity (within 100km for demo)
+        let nearbyUsers = others.filter(user => {
+            if (!user.location) return true; // Show all for now
+            if (!userLocation) return true;
+            
+            // Calculate distance (simplified)
+            let distance = calculateDistance(userLocation.lat, userLocation.lng, user.location.lat, user.location.lng);
+            return distance <= 100; // 100km radius
+        });
+        
+        if (nearbyUsers.length === 0) {
             container.innerHTML = '<div style="color:#94a3b8; position:absolute; top:45%; left:40%; background:#0f172a; padding:8px 20px; border-radius:30px;">No users nearby</div>';
             return;
         }
@@ -658,8 +704,8 @@
         let centerX = (rect.width || window.innerWidth) * 0.58;
         let centerY = (rect.height || window.innerHeight) * 0.45;
         
-        others.forEach((user, idx) => {
-            let angle = (idx / others.length) * Math.PI * 2;
+        nearbyUsers.forEach((user, idx) => {
+            let angle = (idx / nearbyUsers.length) * Math.PI * 2;
             let radius = 130 + (idx % 3) * 40;
             let left = centerX + Math.cos(angle) * radius - 45;
             let top = centerY + Math.sin(angle) * (radius * 0.7) - 25;
@@ -674,7 +720,19 @@
             card.onclick = (e) => { e.stopPropagation(); showProfileCard(user); };
             container.appendChild(card);
         });
-        showToast(`${others.length} user(s) nearby. Click to view profile.`);
+        showToast(`${nearbyUsers.length} user(s) nearby. Click to view profile.`);
+    }
+
+    // Calculate distance between two coordinates (Haversine formula)
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; // Earth's radius in km
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c; // Distance in km
     }
 
     function openEditModal() {
